@@ -6,3 +6,5 @@ repository = "https://github.com/ALPHA-g-Experiment/elogger"
 publish = false
 
 [dependencies]
+anyhow = "1.0.89"
+clap = { version = "4.5.18", features = ["derive"] }
