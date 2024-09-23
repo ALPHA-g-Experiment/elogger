@@ -3,6 +3,8 @@ use clap::Parser;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+mod data_handler;
+
 #[derive(Parser)]
 #[command(version)]
 /// Create an elog for a single run
