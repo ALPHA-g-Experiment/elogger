@@ -35,7 +35,7 @@ fn is_data_handler_ready(run_number: u32, config: &DataHandler) -> Result<bool> 
     .is_success())
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Record {
     pub sequencer_name: String,
     pub event_description: String,

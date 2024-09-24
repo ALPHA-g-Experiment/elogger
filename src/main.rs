@@ -1,3 +1,4 @@
+use crate::data_handler::{get_spill_log, Record, SpillLog};
 use anyhow::{Context, Result};
 use clap::Parser;
 use serde::Deserialize;
@@ -62,5 +63,29 @@ fn main() -> Result<()> {
         .with_context(|| format!("failed to read `{}`", config.display()))?;
     let config: Config = toml::from_str(&config).context("failed to parse configuration")?;
 
+    let spill_log = get_spill_log(args.run_number, &config.data_handler)
+        .context("failed to get spill log from the data handler")?;
+    let records = loggable_records(&spill_log, &config.diagnostics);
+
     Ok(())
+}
+
+fn find_diagnostic<'a, T>(record: &Record, diagnostics: &'a T) -> Option<&'a Diagnostic>
+where
+    &'a T: IntoIterator<Item = &'a Diagnostic>,
+{
+    diagnostics.into_iter().find(|diagnostic| {
+        diagnostic.sequencer_name == record.sequencer_name
+            && diagnostic.event_description == record.event_description
+    })
+}
+
+fn loggable_records<'a, T>(spill_log: &SpillLog, diagnostics: &'a T) -> Vec<Record>
+where
+    &'a T: IntoIterator<Item = &'a Diagnostic>,
+{
+    let mut records = spill_log.records.clone();
+    records.retain(|record| find_diagnostic(record, diagnostics).is_some());
+
+    records
 }
