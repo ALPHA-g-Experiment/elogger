@@ -1,4 +1,4 @@
-use crate::DataHandler;
+use crate::config::DataHandlerConfig;
 use anyhow::{bail, ensure, Context, Result};
 use reqwest::blocking::Response;
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,7 @@ enum ServerResponse {
 // successful response before requesting anything via websockets.
 // This is VERY IMPORTANT (due to some internal state management). Otherwise, we
 // would be forcing the server to cache incorrect data.
-fn is_data_handler_ready(run_number: u32, config: &DataHandler) -> Result<bool> {
+fn is_data_handler_ready(run_number: u32, config: &DataHandlerConfig) -> Result<bool> {
     Ok(reqwest::blocking::get(format!(
         "http://{}:{}/{run_number}",
         config.host, config.port
@@ -48,7 +48,7 @@ fn is_data_handler_ready(run_number: u32, config: &DataHandler) -> Result<bool> 
     .is_success())
 }
 
-fn ws_request(request: ClientRequest, config: &DataHandler) -> Result<Response> {
+fn ws_request(request: ClientRequest, config: &DataHandlerConfig) -> Result<Response> {
     let msg = ClientMessage {
         service: String::new(),
         context: String::new(),
@@ -106,7 +106,7 @@ pub struct SpillLog {
     pub records: Vec<Record>,
 }
 
-pub fn get_spill_log(run_number: u32, config: &DataHandler) -> Result<SpillLog> {
+pub fn get_spill_log(run_number: u32, config: &DataHandlerConfig) -> Result<SpillLog> {
     ensure!(
         is_data_handler_ready(run_number, config).context("failed to query data handler state")?,
         "data handler is not ready"
