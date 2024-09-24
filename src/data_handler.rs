@@ -1,8 +1,21 @@
 use crate::DataHandler;
 use anyhow::{bail, ensure, Context, Result};
-use serde::Deserialize;
+use reqwest::blocking::Response;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tungstenite::client::connect;
+
+#[derive(Serialize)]
+struct ClientMessage {
+    service: String,
+    context: String,
+    request: ClientRequest,
+}
+
+#[derive(Serialize)]
+enum ClientRequest {
+    SpillLog { run_number: u32 },
+}
 
 #[derive(Deserialize)]
 struct ServerMessage {
@@ -35,34 +48,18 @@ fn is_data_handler_ready(run_number: u32, config: &DataHandler) -> Result<bool> 
     .is_success())
 }
 
-#[derive(Clone, Deserialize)]
-pub struct Record {
-    pub sequencer_name: String,
-    pub event_description: String,
-    pub start_time: f64,
-    pub stop_time: f64,
-    // Key is a Chronobox channel name
-    #[serde(flatten)]
-    pub counts: HashMap<String, u32>,
-}
-
-pub struct SpillLog {
-    pub records: Vec<Record>,
-}
-
-pub fn get_spill_log(run_number: u32, config: &DataHandler) -> Result<SpillLog> {
-    ensure!(
-        is_data_handler_ready(run_number, config).context("failed to query data handler state")?,
-        "data handler is not ready"
-    );
+fn ws_request(request: ClientRequest, config: &DataHandler) -> Result<Response> {
+    let msg = ClientMessage {
+        service: String::new(),
+        context: String::new(),
+        request,
+    };
+    let msg = tungstenite::Message::Text(serde_json::to_string(&msg)?);
 
     let (mut ws, _) = connect(format!("ws://{}:{}/ws", config.host, config.port))
         .context("failed to connect to data handler websocket")?;
-    let message = tungstenite::Message::Text(format!(
-        r#"{{"service": "", "context": "", "request": {{"SpillLog": {{"run_number": {run_number}}}}}}}"#
-    ));
-    ws.send(message)
-        .context("failed to send spill log request to data handler")?;
+    ws.send(msg)
+        .context("failed to send websocket request to data handler")?;
 
     let jwt = loop {
         if let tungstenite::Message::Text(msg) =
@@ -86,13 +83,43 @@ pub fn get_spill_log(run_number: u32, config: &DataHandler) -> Result<SpillLog> 
         config.host, config.port
     ))
     .context("failed GET request to data handler's download endpoint")?;
-    ensure!(resp.status().is_success(), "failed to download spill log");
+    ensure!(
+        resp.status().is_success(),
+        "failed to download from data handler"
+    );
 
+    Ok(resp)
+}
+
+#[derive(Clone, Deserialize)]
+pub struct Record {
+    pub sequencer_name: String,
+    pub event_description: String,
+    pub start_time: f64,
+    pub stop_time: f64,
+    // Key is a Chronobox channel name
+    #[serde(flatten)]
+    pub counts: HashMap<String, u32>,
+}
+
+pub struct SpillLog {
+    pub records: Vec<Record>,
+}
+
+pub fn get_spill_log(run_number: u32, config: &DataHandler) -> Result<SpillLog> {
+    ensure!(
+        is_data_handler_ready(run_number, config).context("failed to query data handler state")?,
+        "data handler is not ready"
+    );
+
+    let resp = ws_request(ClientRequest::SpillLog { run_number }, config)
+        .context("failed to request spill log from data handler")?;
     let records = csv::ReaderBuilder::new()
         .comment(Some(b'#'))
         .from_reader(resp)
         .deserialize()
         .collect::<Result<Vec<Record>, _>>()
         .context("failed to parse spill log")?;
+
     Ok(SpillLog { records })
 }
