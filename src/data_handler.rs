@@ -14,6 +14,7 @@ struct ClientMessage {
 
 #[derive(Serialize)]
 enum ClientRequest {
+    FinalOdb { run_number: u32 },
     SpillLog { run_number: u32 },
 }
 
@@ -122,4 +123,19 @@ pub fn get_spill_log(run_number: u32, config: &DataHandlerConfig) -> Result<Spil
         .context("failed to parse spill log")?;
 
     Ok(SpillLog { records })
+}
+
+pub fn get_final_odb(run_number: u32, config: &DataHandlerConfig) -> Result<serde_json::Value> {
+    ensure!(
+        is_data_handler_ready(run_number, config).context("failed to query data handler state")?,
+        "data handler is not ready"
+    );
+
+    let text = ws_request(ClientRequest::FinalOdb { run_number }, config)
+        .context("failed to request final ODB from data handler")?
+        .text()
+        .context("failed to read final ODB response text")?;
+
+    let offset = text.find('{').context("failed to find start of ODB JSON")?;
+    serde_json::from_str(&text[offset..]).context("failed to parse final ODB")
 }
