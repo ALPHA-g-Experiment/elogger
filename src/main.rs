@@ -1,8 +1,7 @@
-use crate::config::Config;
+use crate::config::{Config, EntryConfig, LogRule};
 use crate::data_handler::{get_spill_log, Record, SpillLog};
 use anyhow::{Context, Result};
 use clap::Parser;
-use serde::Deserialize;
 use std::path::PathBuf;
 
 mod config;
@@ -34,6 +33,47 @@ fn main() -> Result<()> {
 
     let spill_log = get_spill_log(args.run_number, &config.data_handler)
         .context("failed to get spill log from the data handler")?;
+    let records = {
+        let mut records = loggable_records(&spill_log, &config.rules);
+        records.sort_by(|a, b| a.record.stop_time.partial_cmp(&b.record.stop_time).unwrap());
+
+        records
+    };
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct LoggableRecord {
+    record: Record,
+    config: EntryConfig,
+}
+
+fn find_config<'a, T>(record: &Record, rules: &'a T) -> Option<&'a EntryConfig>
+where
+    &'a T: IntoIterator<Item = &'a LogRule>,
+{
+    rules
+        .into_iter()
+        .find(|rule| {
+            rule.sequencer_name == record.sequencer_name
+                && rule.event_description == record.event_description
+        })
+        .map(|rule| &rule.config)
+}
+
+fn loggable_records<'a, T>(spill_log: &SpillLog, rules: &'a T) -> Vec<LoggableRecord>
+where
+    &'a T: IntoIterator<Item = &'a LogRule>,
+{
+    spill_log
+        .records
+        .iter()
+        .filter_map(|record| {
+            find_config(record, rules).map(|config| LoggableRecord {
+                record: record.clone(),
+                config: config.clone(),
+            })
+        })
+        .collect()
 }

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub struct Config {
     elog: ElogConfig,
     pub data_handler: DataHandlerConfig,
-    loggables: Vec<Loggable>,
+    pub rules: Vec<LogRule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,27 +23,27 @@ pub struct DataHandlerConfig {
 }
 
 #[derive(Debug, Deserialize)]
-struct Loggable {
-    sequencer_name: String,
-    event_description: String,
-    config: RecordConfig,
+pub struct LogRule {
+    pub sequencer_name: String,
+    pub event_description: String,
+    pub config: EntryConfig,
 }
 
-#[derive(Debug, Deserialize)]
-struct RecordConfig {
-    chronobox_table: Option<ChronoboxTableConfig>,
+#[derive(Clone, Debug, Deserialize)]
+pub struct EntryConfig {
+    pub chronobox_table: Option<ChronoboxTableConfig>,
     #[serde(default)]
-    external_resources: Vec<ExternalResourceConfig>,
+    pub external_resources: Vec<ExternalResourceConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct ChronoboxTableConfig {
     channel_names: Vec<String>,
     #[serde(default)]
     include_attachments: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct ExternalResourceConfig {
     base_path: PathBuf,
     header: Option<String>,

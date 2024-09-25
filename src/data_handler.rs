@@ -91,7 +91,7 @@ fn ws_request(request: ClientRequest, config: &DataHandlerConfig) -> Result<Resp
     Ok(resp)
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Record {
     pub sequencer_name: String,
     pub event_description: String,
