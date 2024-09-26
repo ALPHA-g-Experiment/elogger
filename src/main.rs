@@ -1,6 +1,6 @@
 use crate::config::{Config, EntryConfig, LogRule};
 use crate::data_handler::{get_spill_log, Record, SpillLog};
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -76,4 +76,33 @@ where
             })
         })
         .collect()
+}
+
+#[derive(Debug)]
+struct ChronoboxChannel {
+    board_name: String,
+    channel_number: u8,
+}
+
+fn find_chronobox_channel(channel_name: &str, odb: &serde_json::Value) -> Result<ChronoboxChannel> {
+    let mut found_channels = Vec::new();
+    for board_name in ["cb01", "cb02", "cb03", "cb04"] {
+        let names = &odb["Equipment"][board_name]["Settings"]["names"]
+            .as_array()
+            .context("failed to find chronobox names array in the ODB")?;
+        for (channel_number, name) in names.iter().filter_map(|n| n.as_str()).enumerate() {
+            if name == channel_name {
+                found_channels.push(ChronoboxChannel {
+                    board_name: board_name.to_string(),
+                    channel_number: channel_number as u8,
+                });
+            }
+        }
+    }
+
+    ensure!(
+        found_channels.len() == 1,
+        "failed to find a unique channel with name `{channel_name}` in the ODB",
+    );
+    Ok(found_channels.pop().unwrap())
 }
