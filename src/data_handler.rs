@@ -3,6 +3,8 @@ use anyhow::{bail, ensure, Context, Result};
 use reqwest::blocking::Response;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use tempfile::Builder;
 use tungstenite::client::connect;
 
 #[derive(Serialize)]
@@ -14,8 +16,16 @@ struct ClientMessage {
 
 #[derive(Serialize)]
 enum ClientRequest {
-    FinalOdb { run_number: u32 },
-    SpillLog { run_number: u32 },
+    ChronoboxPlot {
+        run_number: u32,
+        args: ChronoboxTimestampsArgs,
+    },
+    FinalOdb {
+        run_number: u32,
+    },
+    SpillLog {
+        run_number: u32,
+    },
 }
 
 #[derive(Deserialize)]
@@ -138,4 +148,36 @@ pub fn get_final_odb(run_number: u32, config: &DataHandlerConfig) -> Result<serd
 
     let offset = text.find('{').context("failed to find start of ODB JSON")?;
     serde_json::from_str(&text[offset..]).context("failed to parse final ODB")
+}
+
+#[derive(Serialize)]
+pub struct ChronoboxTimestampsArgs {
+    pub board_name: String,
+    pub channel_number: u8,
+    pub t_bins: Option<u32>,
+    pub t_max: Option<f64>,
+    pub t_min: Option<f64>,
+}
+
+pub fn get_chronobox_plot(
+    run_number: u32,
+    args: ChronoboxTimestampsArgs,
+    config: &DataHandlerConfig,
+) -> Result<PathBuf> {
+    ensure!(
+        is_data_handler_ready(run_number, config).context("failed to query data handler state")?,
+        "data handler is not ready"
+    );
+
+    let mut temp = Builder::new()
+        .keep(true)
+        .suffix(".pdf")
+        .tempfile()
+        .context("failed to create temporary file")?;
+    let resp = ws_request(ClientRequest::ChronoboxPlot { run_number, args }, config)
+        .context("failed to request chronobox plot from data handler")?
+        .copy_to(&mut temp)
+        .context("failed to write chronobox plot to temporary file")?;
+
+    Ok(temp.path().to_owned())
 }
