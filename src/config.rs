@@ -37,10 +37,10 @@ pub struct EntryConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct ChronoboxTableConfig {
-    channel_names: Vec<String>,
+pub struct ChronoboxTableConfig {
+    pub channel_names: Vec<String>,
     #[serde(default)]
-    include_attachments: bool,
+    pub include_attachments: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
