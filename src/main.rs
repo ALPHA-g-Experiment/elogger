@@ -1,5 +1,6 @@
 use crate::config::{Config, Logbook};
 use crate::data_handler::{get_final_odb, get_spill_log};
+use crate::summary::spill_log_summary;
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
 use dialoguer::{theme::ColorfulTheme, Input, Select};
@@ -13,6 +14,7 @@ use tempfile::NamedTempFile;
 mod config;
 mod data_handler;
 mod elog;
+mod summary;
 
 #[derive(Parser)]
 #[command(version)]
@@ -99,6 +101,10 @@ fn main() -> Result<()> {
     };
 
     let mut elog_entry = ElogEntry::new();
+    if let Ok(path) = spill_log_summary(&spill_log, &config.spill_log_columns) {
+        elog_entry.text.push_str("Spill log summary: elog:/1\n\n");
+        elog_entry.attachments.push(path);
+    }
     for loggable in records {
         elog_entry.add_record(args.run_number, &loggable, &final_odb, &config.data_handler);
     }
@@ -121,6 +127,7 @@ fn main() -> Result<()> {
         )
         .args(attributes.iter().flat_map(|attribute| ["-a", attribute]))
         .arg("-x")
+        .args(["-n", "1"])
         .args([OsStr::new("-m"), temp_text.path().as_ref()]);
     if !parent_id.is_empty() {
         cmd.args(["-r", &parent_id]);

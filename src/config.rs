@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    pub spill_log_columns: Vec<String>,
     pub elog: ElogConfig,
     pub data_handler: DataHandlerConfig,
     pub rules: Vec<LogRule>,
