@@ -86,6 +86,11 @@ fn main() -> Result<()> {
             final_odb
                 .pointer("/Experiment/Edit on start/Comment")
                 .and_then(serde_json::Value::as_str)
+                .map(|s| if s.is_empty() {
+                    "MISSING START-RUN COMMENT"
+                } else {
+                    s
+                })
                 .context("failed to get comment from ODB")?
         ));
     }
