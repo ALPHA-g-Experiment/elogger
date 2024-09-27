@@ -3,17 +3,33 @@ use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    elog: ElogConfig,
+    pub elog: ElogConfig,
     pub data_handler: DataHandlerConfig,
     pub rules: Vec<LogRule>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ElogConfig {
-    client: PathBuf,
-    host: String,
-    port: u16,
-    logbook: String,
+pub struct ElogConfig {
+    pub client: PathBuf,
+    pub host: String,
+    pub port: u16,
+    pub logbook: Logbook,
+}
+
+#[derive(Debug, Deserialize)]
+pub enum Logbook {
+    DataLog,
+    #[serde(rename = "test")]
+    Test,
+}
+
+impl std::fmt::Display for Logbook {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Logbook::DataLog => write!(f, "DataLog"),
+            Logbook::Test => write!(f, "test"),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

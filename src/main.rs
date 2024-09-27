@@ -1,9 +1,14 @@
-use crate::config::Config;
+use crate::config::{Config, Logbook};
 use crate::data_handler::{get_final_odb, get_spill_log};
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use clap::Parser;
+use dialoguer::{theme::ColorfulTheme, Input, Select};
 use elog::{loggable_records, ElogEntry};
+use std::ffi::OsStr;
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::Command;
+use tempfile::NamedTempFile;
 
 mod config;
 mod data_handler;
@@ -35,6 +40,54 @@ fn main() -> Result<()> {
 
     let final_odb = get_final_odb(args.run_number, &config.data_handler)
         .context("failed to get the final ODB from the data handler")?;
+
+    let parent_id: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Parent message ID (leave empty to create a new thread instead)")
+        .allow_empty(true)
+        .validate_with(|input: &String| -> Result<(), &str> {
+            if input.is_empty() {
+                Ok(())
+            } else {
+                input
+                    .parse::<u32>()
+                    .map(|_| ())
+                    .map_err(|_| "message ID must be a non-negative integer")
+            }
+        })
+        .interact_text()
+        .context("failed to read parent message ID")?;
+
+    let mut attributes = Vec::new();
+    let author: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Author")
+        .interact_text()
+        .context("failed to read author")?;
+    attributes.push(format!("Author={author}"));
+    if let Logbook::DataLog = config.elog.logbook {
+        let types = &[
+            "Baseline Log",
+            "Pbar Log",
+            "Trapping Series",
+            "Electron Log",
+            "Positron Log",
+        ];
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Type")
+            .default(0)
+            .items(&types[..])
+            .interact()
+            .context("failed to read logbook")?;
+        attributes.push(format!("Type={}", types[selection]));
+        attributes.push(format!("Run={}", args.run_number));
+        attributes.push(format!(
+            "Subject={}",
+            final_odb
+                .pointer("/Experiment/Edit on start/Comment")
+                .and_then(serde_json::Value::as_str)
+                .context("failed to get comment from ODB")?
+        ));
+    }
+
     let spill_log = get_spill_log(args.run_number, &config.data_handler)
         .context("failed to get spill log from the data handler")?;
 
@@ -50,8 +103,31 @@ fn main() -> Result<()> {
         elog_entry.add_record(args.run_number, &loggable, &final_odb, &config.data_handler);
     }
 
-    println!("{}", elog_entry.text);
-    println!("{:?}", elog_entry.attachments);
+    let mut temp_text =
+        NamedTempFile::new().context("failed to create temporary elog text file")?;
+    temp_text
+        .write_all(elog_entry.text.as_bytes())
+        .context("failed to write to temporary elog text file")?;
+
+    let mut cmd = Command::new(&config.elog.client);
+    cmd.args(["-h", &config.elog.host])
+        .args(["-p", &config.elog.port.to_string()])
+        .args(["-l", &config.elog.logbook.to_string()])
+        .args(
+            elog_entry
+                .attachments
+                .iter()
+                .flat_map(|path| [OsStr::new("-f"), path.as_ref()]),
+        )
+        .args(attributes.iter().flat_map(|attribute| ["-a", attribute]))
+        .arg("-x")
+        .args([OsStr::new("-m"), temp_text.path().as_ref()]);
+    if !parent_id.is_empty() {
+        cmd.args(["-r", &parent_id]);
+    }
+
+    let status = cmd.status().context("failed to run the elog client")?;
+    ensure!(status.success(), "elog client failed with `{status}`");
 
     Ok(())
 }
