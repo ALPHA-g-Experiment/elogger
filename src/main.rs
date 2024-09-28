@@ -1,10 +1,11 @@
 use crate::config::{Config, Logbook};
-use crate::data_handler::{get_final_odb, get_spill_log};
+use crate::data_handler::{get_final_odb, get_sequencer_headers, get_spill_log};
 use crate::summary::spill_log_summary;
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
 use dialoguer::{theme::ColorfulTheme, Input, Select};
 use elog::{loggable_records, ElogEntry};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::PathBuf;
@@ -95,6 +96,11 @@ fn main() -> Result<()> {
         ));
     }
 
+    let spinner = ProgressBar::new_spinner()
+        .with_style(ProgressStyle::default_spinner().tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "));
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    spinner.set_message("Getting spill log...");
     let spill_log = get_spill_log(args.run_number, &config.data_handler)
         .context("failed to get spill log from the data handler")?;
 
@@ -106,10 +112,22 @@ fn main() -> Result<()> {
     };
 
     let mut elog_entry = ElogEntry::new();
-    if let Ok(path) = spill_log_summary(&spill_log, &config.spill_log_columns) {
-        elog_entry.text.push_str("Spill log summary: elog:/1\n\n");
+
+    spinner.set_message("Logging header...");
+    if let Ok(path) = get_sequencer_headers(args.run_number, &config.data_handler) {
         elog_entry.attachments.push(path);
+        elog_entry.text.push_str("Sequencer: elog:/1\n");
     }
+    if let Ok(path) = spill_log_summary(&spill_log, &config.spill_log_columns) {
+        elog_entry.attachments.push(path);
+        elog_entry.text.push_str(&format!(
+            "Spill log summary: elog:/{}\n",
+            elog_entry.attachments.len()
+        ));
+    }
+    elog_entry.text.push_str("\n");
+
+    spinner.set_message("Logging records...");
     for loggable in records {
         elog_entry.add_record(args.run_number, &loggable, &final_odb, &config.data_handler);
     }
@@ -120,6 +138,7 @@ fn main() -> Result<()> {
         .write_all(elog_entry.text.as_bytes())
         .context("failed to write to temporary elog text file")?;
 
+    spinner.set_message("Pushing to server...");
     let mut cmd = Command::new(&config.elog.client);
     cmd.args(["-h", &config.elog.host])
         .args(["-p", &config.elog.port.to_string()])
@@ -138,8 +157,19 @@ fn main() -> Result<()> {
         cmd.args(["-r", &parent_id]);
     }
 
-    let status = cmd.status().context("failed to run the elog client")?;
-    ensure!(status.success(), "elog client failed with `{status}`");
+    let output = cmd.output().context("failed to run the elog client")?;
+    ensure!(
+        output.status.success(),
+        "elog client failed with {}",
+        output.status
+    );
+    spinner.finish_and_clear();
+    // The elog client doesn't report errors correctly. With some failure modes,
+    // it will still return a successful exit code but print an error message to
+    // stdout or stderr. Basically, there is no way to know if the elog was
+    // successfully created other than reading all output of the command.
+    let _ = std::io::stdout().write_all(&output.stdout);
+    let _ = std::io::stderr().write_all(&output.stderr);
 
     Ok(())
 }

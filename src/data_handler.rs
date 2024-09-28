@@ -3,6 +3,7 @@ use anyhow::{bail, ensure, Context, Result};
 use reqwest::blocking::Response;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use tempfile::Builder;
 use tungstenite::client::connect;
@@ -21,6 +22,9 @@ enum ClientRequest {
         args: ChronoboxTimestampsArgs,
     },
     FinalOdb {
+        run_number: u32,
+    },
+    SequencerCsv {
         run_number: u32,
     },
     SpillLog {
@@ -133,6 +137,42 @@ pub fn get_spill_log(run_number: u32, config: &DataHandlerConfig) -> Result<Spil
         .context("failed to parse spill log")?;
 
     Ok(SpillLog { records })
+}
+
+#[derive(Debug, Deserialize)]
+struct SequencerRecord {
+    serial_number: u32,
+    midas_timestamp: u32,
+    header: String,
+    xml: String,
+}
+
+pub fn get_sequencer_headers(run_number: u32, config: &DataHandlerConfig) -> Result<PathBuf> {
+    ensure!(
+        is_data_handler_ready(run_number, config).context("failed to query data handler state")?,
+        "data handler is not ready"
+    );
+
+    let resp = ws_request(ClientRequest::SequencerCsv { run_number }, config)
+        .context("failed to request sequencer CSV from data handler")?;
+    let records = csv::ReaderBuilder::new()
+        .comment(Some(b'#'))
+        .from_reader(resp)
+        .deserialize::<SequencerRecord>()
+        .map(|record| record.map(|record| record.header))
+        .collect::<Result<Vec<String>, _>>()
+        .context("failed to parse sequencer CSV")?
+        .join("\n\n\n");
+
+    let mut temp = Builder::new()
+        .keep(true)
+        .suffix(".txt")
+        .tempfile()
+        .context("failed to create temporary file")?;
+    temp.write_all(records.as_bytes())
+        .context("failed to write sequencer headers to temporary file")?;
+
+    Ok(temp.path().to_owned())
 }
 
 pub fn get_final_odb(run_number: u32, config: &DataHandlerConfig) -> Result<serde_json::Value> {
