@@ -1,5 +1,5 @@
 use crate::config::{Config, Logbook};
-use crate::data_handler::{get_final_odb, get_spill_log};
+use crate::data_handler::{get_final_odb, get_sequencer_headers, get_spill_log};
 use crate::summary::spill_log_summary;
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
@@ -106,10 +106,20 @@ fn main() -> Result<()> {
     };
 
     let mut elog_entry = ElogEntry::new();
-    if let Ok(path) = spill_log_summary(&spill_log, &config.spill_log_columns) {
-        elog_entry.text.push_str("Spill log summary: elog:/1\n\n");
+
+    if let Ok(path) = get_sequencer_headers(args.run_number, &config.data_handler) {
         elog_entry.attachments.push(path);
+        elog_entry.text.push_str("Sequencer: elog:/1\n");
     }
+    if let Ok(path) = spill_log_summary(&spill_log, &config.spill_log_columns) {
+        elog_entry.attachments.push(path);
+        elog_entry.text.push_str(&format!(
+            "Spill log summary: elog:/{}\n",
+            elog_entry.attachments.len()
+        ));
+    }
+    elog_entry.text.push_str("\n");
+
     for loggable in records {
         elog_entry.add_record(args.run_number, &loggable, &final_odb, &config.data_handler);
     }
