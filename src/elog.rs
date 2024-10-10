@@ -1,6 +1,7 @@
 use crate::config::{DataHandlerConfig, EntryConfig, LogRule};
 use crate::data_handler::{get_chronobox_plot, ChronoboxTimestampsArgs, Record, SpillLog};
 use anyhow::{ensure, Context, Result};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -86,12 +87,9 @@ impl ElogEntry {
         loggable: &LoggableRecord,
         odb: &serde_json::Value,
         handler_config: &DataHandlerConfig,
+        external_resources: &mut HashMap<PathBuf, VecDeque<PathBuf>>,
     ) {
-        let mut new_text = format!(
-            "{} - {}\n",
-            loggable.record.sequencer_name.to_uppercase(),
-            loggable.record.event_description
-        );
+        let mut sections = Vec::new();
 
         if let Some(table_config) = &loggable.config.chronobox_table {
             let mut header = table_config.channel_names.clone();
@@ -132,9 +130,50 @@ impl ElogEntry {
             let mut builder = tabled::builder::Builder::new();
             builder.push_record(header);
             builder.push_record(data);
-            new_text.push_str(&format!("{}\n", builder.build()));
+            sections.push(builder.build().to_string());
         }
 
-        self.text.push_str(&indent::indent_by(4, new_text));
+        for config in &loggable.config.external_resources {
+            let attachment = external_resources
+                .get_mut(&config.base_path)
+                .and_then(|paths| paths.pop_front());
+
+            let mut text = String::new();
+
+            if let Some(header) = &config.header {
+                text.push_str(&format!("{}", header));
+            }
+            if config.include_description {
+                let description = attachment
+                    .clone()
+                    .and_then(|path| std::fs::read_to_string(path.with_extension("txt")).ok())
+                    .unwrap_or_else(|| String::from("<MISSING_DESCRIPTION> "));
+
+                text.push_str(&description);
+            }
+            if config.include_attachment {
+                if let Some(path) = attachment {
+                    self.attachments.push(path);
+                    text.push_str(&format!("elog:/{}", self.attachments.len()));
+                } else {
+                    text.push_str("<MISSING_ATTACHMENT>");
+                }
+            }
+
+            if !text.is_empty() {
+                sections.push(text);
+            }
+        }
+
+        if !sections.is_empty() {
+            let text = format!(
+                "{} - {}\n{}\n\n",
+                loggable.record.sequencer_name.to_uppercase(),
+                loggable.record.event_description,
+                sections.join("\n\n")
+            );
+
+            self.text.push_str(&indent::indent_by(4, text));
+        }
     }
 }

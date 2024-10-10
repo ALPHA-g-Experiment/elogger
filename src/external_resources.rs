@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use jiff::{tz::TimeZone, Timestamp, Zoned};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -41,7 +42,7 @@ pub fn find_external_resources(
     base_path: PathBuf,
     start_time: Zoned,
     stop_time: Zoned,
-) -> Result<Vec<PathBuf>> {
+) -> VecDeque<PathBuf> {
     let first_possible_entry = base_path
         .join(start_time.year().to_string())
         .join(format!("{:02}", start_time.month()))
@@ -63,7 +64,7 @@ pub fn find_external_resources(
             stop_time.second(),
         ));
 
-    let mut paths = Vec::new();
+    let mut paths = VecDeque::new();
 
     let mut date = start_time.date();
     while date <= stop_time.date() {
@@ -71,30 +72,31 @@ pub fn find_external_resources(
             .join(date.year().to_string())
             .join(format!("{:02}", date.month()))
             .join(format!("{:02}", date.day()));
+        if let Ok(entries) = std::fs::read_dir(&folder) {
+            let mut entries = entries
+                .filter_map(|res| res.map(|e| e.path()).ok())
+                .filter(|p| {
+                    p.is_file()
+                        && p.file_name()
+                            .and_then(|f| f.to_str())
+                            .map(|f| FILE_PATTERN.is_match(f))
+                            .unwrap_or(false)
+                })
+                .collect::<Vec<_>>();
 
-        let mut entries = std::fs::read_dir(&folder)
-            .context(format!("failed to read directory `{}`", folder.display()))?
-            .filter_map(|res| res.map(|e| e.path()).ok())
-            .filter(|p| {
-                p.is_file()
-                    && p.file_name()
-                        .and_then(|f| f.to_str())
-                        .map(|f| FILE_PATTERN.is_match(f))
-                        .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-        if date == start_time.date() {
-            entries.retain(|p| p > &first_possible_entry);
-        }
-        if date == stop_time.date() {
-            entries.retain(|p| p < &last_possible_entry);
-        }
-        entries.sort_unstable();
+            if date == start_time.date() {
+                entries.retain(|p| p > &first_possible_entry);
+            }
+            if date == stop_time.date() {
+                entries.retain(|p| p < &last_possible_entry);
+            }
+            entries.sort_unstable();
 
-        paths.extend(entries);
+            paths.extend(entries);
+        }
 
         date = date.tomorrow().unwrap();
     }
 
-    Ok(paths)
+    paths
 }

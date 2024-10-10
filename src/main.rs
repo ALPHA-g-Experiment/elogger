@@ -1,11 +1,13 @@
 use crate::config::{Config, Logbook};
 use crate::data_handler::{get_final_odb, get_sequencer_headers, get_spill_log};
+use crate::external_resources::{find_external_resources, run_time_limits};
 use crate::summary::spill_log_summary;
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
 use dialoguer::{theme::ColorfulTheme, Input, Select};
 use elog::{loggable_records, ElogEntry};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::PathBuf;
@@ -15,6 +17,7 @@ use tempfile::NamedTempFile;
 mod config;
 mod data_handler;
 mod elog;
+mod external_resources;
 mod summary;
 
 #[derive(Parser)]
@@ -110,14 +113,46 @@ fn main() -> Result<()> {
 
         records
     };
+    let (start_time, stop_time) =
+        run_time_limits(&final_odb).context("failed to get run time limits from the final ODB")?;
+    let base_paths = records
+        .iter()
+        .flat_map(|loggable| loggable.config.external_resources.clone())
+        .map(|config| config.base_path)
+        .collect::<HashSet<_>>();
+    let mut external_resources = base_paths
+        .into_iter()
+        .map(|base_path| {
+            (
+                base_path.clone(),
+                find_external_resources(base_path, start_time.clone(), stop_time.clone()),
+            )
+        })
+        .collect::<HashMap<_, _>>();
 
     let mut elog_entry = ElogEntry::new();
+    elog_entry.text.push_str(&format!(
+        "Run started: {} at {}\n",
+        start_time.date(),
+        start_time.time()
+    ));
+    elog_entry.text.push_str(&format!(
+        "Run stopped: {} at {}\n",
+        stop_time.date(),
+        stop_time.time()
+    ));
+    elog_entry.text.push_str("\n");
 
     spinner.set_message("Logging header...");
+    /*
     if let Ok(path) = get_sequencer_headers(args.run_number, &config.data_handler) {
         elog_entry.attachments.push(path);
-        elog_entry.text.push_str("Sequencer: elog:/1\n");
+        elog_entry.text.push_str(&format!(
+            "Sequencer: elog:/{}\n",
+            elog_entry.attachments.len()
+        ));
     }
+    */
     if let Ok(path) = spill_log_summary(&spill_log, &config.spill_log_columns) {
         elog_entry.attachments.push(path);
         elog_entry.text.push_str(&format!(
@@ -129,7 +164,13 @@ fn main() -> Result<()> {
 
     spinner.set_message("Logging records...");
     for loggable in records {
-        elog_entry.add_record(args.run_number, &loggable, &final_odb, &config.data_handler);
+        elog_entry.add_record(
+            args.run_number,
+            &loggable,
+            &final_odb,
+            &config.data_handler,
+            &mut external_resources,
+        );
     }
 
     let mut temp_text =
