@@ -1,6 +1,6 @@
 [package]
 name = "alpha-g-elogger"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2021"
 repository = "https://github.com/ALPHA-g-Experiment/elogger"
 publish = false
