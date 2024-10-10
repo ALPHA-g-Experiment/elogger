@@ -61,11 +61,11 @@ pub struct ChronoboxTableConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct ExternalResourceConfig {
-    base_path: PathBuf,
-    header: Option<String>,
+pub struct ExternalResourceConfig {
+    pub base_path: PathBuf,
+    pub header: Option<String>,
     #[serde(default)]
-    include_description: bool,
+    pub include_description: bool,
     #[serde(default)]
-    include_attachment: bool,
+    pub include_attachment: bool,
 }
